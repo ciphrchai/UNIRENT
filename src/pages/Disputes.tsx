@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ShieldAlert,
@@ -8,6 +9,7 @@ import {
   Info,
   ExternalLink,
   PlusCircle,
+  ShieldCheck,
 } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { DisputeRecord, DisputeStatus } from '../types';
@@ -17,15 +19,23 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { EmptyState } from '../components/common/EmptyState';
 import { useToast } from '../components/common/ToastContext';
+import { useWallet } from '../context/WalletContext';
+import { raiseDispute } from '../blockchain/contract';
+import { EXPLORER_TX_URL } from '../blockchain/config';
+import { switchToMSTNetwork } from '../blockchain/wallet';
 
 export const Disputes: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [disputes, setDisputes] = useState<DisputeRecord[]>(StorageService.getDisputes());
   const [isRaiseModalOpen, setIsRaiseModalOpen] = useState(false);
   const [selectedDispute, setSelectedDispute] = useState<DisputeRecord | null>(null);
+  const [isSubmittingOnChain, setIsSubmittingOnChain] = useState(false);
   const { showToast } = useToast();
+  const { wallet, connect } = useWallet();
 
   // Form state
-  const [rentalRef, setRentalRef] = useState('');
+  const [rentalRef, setRentalRef] = useState(searchParams.get('rentalRef') || '');
+  const [onChainRentalIdInput, setOnChainRentalIdInput] = useState('');
   const [itemTitle, setItemTitle] = useState('');
   const [reason, setReason] = useState('');
   const [description, setDescription] = useState('');
@@ -43,11 +53,45 @@ export const Disputes: React.FC = () => {
     }
   };
 
-  const handleRaiseDispute = (e: React.FormEvent) => {
+  const handleRaiseDispute = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rentalRef.trim() || !itemTitle.trim() || !reason.trim() || !description.trim()) {
       showToast('Please fill all dispute details.', 'error');
       return;
+    }
+
+    let txHash: string | undefined;
+
+    // If an on-chain Rental ID is provided, freeze escrow in the smart contract
+    if (onChainRentalIdInput.trim()) {
+      const rId = parseInt(onChainRentalIdInput.trim(), 10);
+      if (!isNaN(rId) && rId > 0) {
+        if (!wallet.connected || !wallet.signer) {
+          showToast('Please connect your wallet to submit on-chain dispute freeze.', 'error');
+          await connect();
+          return;
+        }
+        if (!wallet.isCorrectNetwork) {
+          showToast('Please switch network to MST Testnet (91562037).', 'error');
+          await switchToMSTNetwork();
+          return;
+        }
+
+        setIsSubmittingOnChain(true);
+        try {
+          showToast('Freezing escrow funds on MST Testnet smart contract...', 'info');
+          const res = await raiseDispute(wallet.signer, BigInt(rId));
+          txHash = res.hash;
+          showToast(`Dispute frozen on-chain! Escrow settlement locked. Tx: ${res.hash.slice(0, 10)}...`, 'success');
+        } catch (err: any) {
+          console.error('Failed to raise on-chain dispute:', err);
+          showToast(err?.message || 'On-chain dispute call failed.', 'error');
+          setIsSubmittingOnChain(false);
+          return;
+        } finally {
+          setIsSubmittingOnChain(false);
+        }
+      }
     }
 
     const newDisp = StorageService.createDispute({
@@ -62,6 +106,7 @@ export const Disputes: React.FC = () => {
     setIsRaiseModalOpen(false);
     // Reset
     setRentalRef('');
+    setOnChainRentalIdInput('');
     setItemTitle('');
     setReason('');
     setDescription('');
@@ -237,6 +282,15 @@ export const Disputes: React.FC = () => {
             value={rentalRef}
             onChange={(e) => setRentalRef(e.target.value)}
             required
+          />
+
+          <Input
+            label="On-Chain Rental ID (Optional - Freezes smart contract escrow)"
+            placeholder="e.g. 1"
+            type="number"
+            min={1}
+            value={onChainRentalIdInput}
+            onChange={(e) => setOnChainRentalIdInput(e.target.value)}
           />
 
           <Input

@@ -11,6 +11,12 @@ export interface PaymentMethodsProps {
   walletBalance: number;
   walletAddress: string;
   totalAmount: number;
+  realWalletConnected?: boolean;
+  realWalletBalance?: string;
+  realWalletAddress?: string;
+  isCorrectNetwork?: boolean;
+  onConnectWallet?: () => void;
+  onSwitchNetwork?: () => void;
 }
 
 export const PaymentMethods: React.FC<PaymentMethodsProps> = ({
@@ -19,6 +25,12 @@ export const PaymentMethods: React.FC<PaymentMethodsProps> = ({
   walletBalance,
   walletAddress,
   totalAmount,
+  realWalletConnected,
+  realWalletBalance,
+  realWalletAddress,
+  isCorrectNetwork,
+  onConnectWallet,
+  onSwitchNetwork,
 }) => {
   return (
     <div className="bg-white border border-[#E5E8EF] rounded-xl p-5 shadow-xs space-y-4">
@@ -134,32 +146,72 @@ export const PaymentMethods: React.FC<PaymentMethodsProps> = ({
                 <Wallet className="w-3.5 h-3.5" />
               </div>
               <span className="font-semibold text-sm text-[#202938]">
-                UniRent Wallet (MST Coins)
+                MST Testnet Wallet (tMSTC)
               </span>
             </div>
-            <Badge variant="primary" size="sm">
-              Available: {walletBalance.toLocaleString('en-IN')} MST
-            </Badge>
+            {realWalletConnected ? (
+              isCorrectNetwork ? (
+                <Badge variant="success" size="sm">
+                  {realWalletBalance ?? '0'} tMSTC Available
+                </Badge>
+              ) : (
+                <Badge variant="danger" size="sm">
+                  Wrong Network
+                </Badge>
+              )
+            ) : (
+              <Badge variant="neutral" size="sm">
+                Wallet Not Connected
+              </Badge>
+            )}
           </div>
 
           <p className="text-[#687386] text-xs">
-            Rental payment and security deposit will be locked in smart-contract escrow once blockchain integration is implemented.
+            Rental payment and security deposit will be locked directly in the deployed UniRent smart contract on MST Testnet.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
-            <div className="p-2 bg-white border border-[#E5E8EF] rounded">
-              <span className="text-[#687386] block">Required for Booking</span>
-              <span className="font-bold text-[#3157C8] text-xs">
-                {totalAmount.toLocaleString('en-IN')} MST ({formatINR(totalAmount)})
-              </span>
+          {!realWalletConnected ? (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConnectWallet?.();
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#3157C8] text-white hover:bg-[#2446A8] transition-colors cursor-pointer"
+              >
+                Connect BridgeKey / EVM Wallet
+              </button>
             </div>
-            <div className="p-2 bg-white border border-[#E5E8EF] rounded">
-              <span className="text-[#687386] block">Connected Address</span>
-              <span className="font-mono text-[#202938] text-xs truncate block">
-                {walletAddress}
-              </span>
+          ) : !isCorrectNetwork ? (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSwitchNetwork?.();
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors cursor-pointer"
+              >
+                Switch to MST Testnet (Chain ID 91562037)
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
+              <div className="p-2 bg-white border border-[#E5E8EF] rounded">
+                <span className="text-[#687386] block">Escrow Hold Amount</span>
+                <span className="font-bold text-[#3157C8] text-xs">
+                  {(totalAmount / 1000).toFixed(3)} tMSTC ({formatINR(totalAmount)})
+                </span>
+              </div>
+              <div className="p-2 bg-white border border-[#E5E8EF] rounded">
+                <span className="text-[#687386] block">Connected Wallet</span>
+                <span className="font-mono text-[#202938] text-xs truncate block" title={realWalletAddress}>
+                  {realWalletAddress ? `${realWalletAddress.slice(0, 10)}...${realWalletAddress.slice(-6)}` : walletAddress}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </label>
     </div>

@@ -128,6 +128,10 @@ export const StorageService = {
     rentalFee: number;
     securityDeposit: number;
     totalAmount: number;
+    onChainRentalId?: number;
+    blockchainTxHash?: string;
+    ownerWalletAddress?: string;
+    renterWalletAddress?: string;
   }): RentalBooking {
     const bookings = this.getBookings();
     const currentUser = this.getCurrentUser();
@@ -153,33 +157,56 @@ export const StorageService = {
       totalAmount: params.totalAmount,
       status: 'Upcoming',
       createdAt: new Date().toISOString().split('T')[0],
+      onChainRentalId: params.onChainRentalId,
+      blockchainTxHash: params.blockchainTxHash,
+      ownerWalletAddress: params.ownerWalletAddress,
+      renterWalletAddress: params.renterWalletAddress,
     };
 
     setStored(KEYS.BOOKINGS, [newBooking, ...bookings]);
 
-    // Record simulated transactions
+    // Record transactions
     const txs = this.getTransactions();
-    const depositTx: TransactionRecord = {
-      id: `tx-${Date.now()}-1`,
-      reference: `TX-${Math.floor(10000 + Math.random() * 90000)}-UR`,
-      itemName: params.item.title,
-      type: 'Deposit Escrow',
-      amount: params.securityDeposit,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      status: 'Pending Escrow',
-      blockchainTxHash: `MST-Simulated: 0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)} [Pending Contract Escrow]`,
-    };
-    const rentTx: TransactionRecord = {
-      id: `tx-${Date.now()}-2`,
-      reference: `TX-${Math.floor(10000 + Math.random() * 90000)}-UR`,
-      itemName: params.item.title,
-      type: 'Rental Payment',
-      amount: params.rentalFee,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      status: 'Pending Escrow',
-      blockchainTxHash: `MST-Simulated: 0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)} [Pending Contract Escrow]`,
-    };
-    setStored(KEYS.TRANSACTIONS, [depositTx, rentTx, ...txs]);
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
+    if (params.blockchainTxHash) {
+      // Real MST Testnet Escrow Lock transaction
+      const escrowTx: TransactionRecord = {
+        id: `tx-${Date.now()}-1`,
+        reference: `TX-${Math.floor(10000 + Math.random() * 90000)}-MST`,
+        itemName: params.item.title,
+        type: 'Deposit Escrow',
+        amount: params.totalAmount,
+        date: nowStr,
+        status: 'Completed',
+        blockchainTxHash: params.blockchainTxHash,
+        isRealOnChain: true,
+        rentalId: params.onChainRentalId,
+      };
+      setStored(KEYS.TRANSACTIONS, [escrowTx, ...txs]);
+    } else {
+      const depositTx: TransactionRecord = {
+        id: `tx-${Date.now()}-1`,
+        reference: `TX-${Math.floor(10000 + Math.random() * 90000)}-UR`,
+        itemName: params.item.title,
+        type: 'Deposit Escrow',
+        amount: params.securityDeposit,
+        date: nowStr,
+        status: 'Pending Escrow',
+        blockchainTxHash: 'MST: Local Prototype Booking',
+      };
+      const rentTx: TransactionRecord = {
+        id: `tx-${Date.now()}-2`,
+        reference: `TX-${Math.floor(10000 + Math.random() * 90000)}-UR`,
+        itemName: params.item.title,
+        type: 'Rental Payment',
+        amount: params.rentalFee,
+        date: nowStr,
+        status: 'Pending Escrow',
+        blockchainTxHash: 'MST: Local Prototype Booking',
+      };
+      setStored(KEYS.TRANSACTIONS, [depositTx, rentTx, ...txs]);
+    }
 
     // Update user rented count
     this.updateCurrentUser({ itemsRentedCount: currentUser.itemsRentedCount + 1 });
@@ -191,6 +218,20 @@ export const StorageService = {
     const bookings = this.getBookings();
     const updated = bookings.map((b) => (b.id === id ? { ...b, status } : b));
     setStored(KEYS.BOOKINGS, updated);
+  },
+
+  updateBooking(id: string, updates: Partial<RentalBooking>): RentalBooking | null {
+    const bookings = this.getBookings();
+    const index = bookings.findIndex((b) => b.id === id || b.bookingRef === id);
+    if (index === -1) return null;
+    bookings[index] = { ...bookings[index], ...updates };
+    setStored(KEYS.BOOKINGS, bookings);
+    return bookings[index];
+  },
+
+  addTransaction(tx: TransactionRecord): void {
+    const txs = this.getTransactions();
+    setStored(KEYS.TRANSACTIONS, [tx, ...txs]);
   },
 
   getTransactions(): TransactionRecord[] {

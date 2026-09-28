@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   PlusCircle,
@@ -19,10 +19,38 @@ import { ConfirmationDialog } from '../components/common/ConfirmationDialog';
 import { EmptyState } from '../components/common/EmptyState';
 import { useToast } from '../components/common/ToastContext';
 import { formatINR, FALLBACK_IMAGE } from '../utils/format';
+import { useWallet } from '../context/WalletContext';
+import {
+  createRental,
+  confirmHandover,
+  confirmReturn,
+  fetchRental,
+  inrToWei,
+  parseToWei,
+  OnChainRental,
+} from '../blockchain/contract';
+import { EXPLORER_TX_URL, MST_NETWORK, RentalState } from '../blockchain/config';
+import { switchToMSTNetwork } from '../blockchain/wallet';
+import { ShieldCheck, ExternalLink, RefreshCw } from 'lucide-react';
+
+interface OwnerAgreement {
+  rentalId: number;
+  itemId: string;
+  itemTitle: string;
+  renter: string;
+  rentMSTC: string;
+  depositMSTC: string;
+  durationDays: number;
+  txHash: string;
+  createdAt: string;
+}
+
+const OWNER_AGREEMENTS_KEY = 'unirent_owner_agreements_v1';
 
 export const MyListings: React.FC = () => {
   const currentUser = StorageService.getCurrentUser();
   const { showToast } = useToast();
+  const { wallet, connect } = useWallet();
 
   const [items, setItems] = useState<RentalItem[]>(() => {
     const all = StorageService.getItems();
@@ -32,6 +60,171 @@ export const MyListings: React.FC = () => {
 
   const [editingItem, setEditingItem] = useState<RentalItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RentalItem | null>(null);
+
+  // On-Chain Escrow Modal state
+  const [escrowTargetItem, setEscrowTargetItem] = useState<RentalItem | null>(null);
+  const [renterAddressInput, setRenterAddressInput] = useState('');
+  const [escrowRentMSTC, setEscrowRentMSTC] = useState('0.450');
+  const [escrowDepositMSTC, setEscrowDepositMSTC] = useState('1.500');
+  const [escrowDurationDays, setEscrowDurationDays] = useState(3);
+  const [isCreatingEscrow, setIsCreatingEscrow] = useState(false);
+  const [createdEscrowResult, setCreatedEscrowResult] = useState<{ rentalId: number; txHash: string } | null>(null);
+
+  // Stored owner agreements
+  const [ownerAgreements, setOwnerAgreements] = useState<OwnerAgreement[]>(() => {
+    try {
+      const data = localStorage.getItem(OWNER_AGREEMENTS_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [agreementOnChainData, setAgreementOnChainData] = useState<Record<number, OnChainRental>>({});
+  const [actionLoadingRentalId, setActionLoadingRentalId] = useState<number | null>(null);
+
+  const refreshAgreementsOnChain = async () => {
+    if (!wallet.provider || ownerAgreements.length === 0) return;
+    const map: Record<number, OnChainRental> = {};
+    for (const ag of ownerAgreements) {
+      try {
+        const data = await fetchRental(wallet.provider, BigInt(ag.rentalId));
+        map[ag.rentalId] = data;
+      } catch (e) {
+        console.warn('Error fetching agreement', ag.rentalId, e);
+      }
+    }
+    setAgreementOnChainData(map);
+  };
+
+  useEffect(() => {
+    refreshAgreementsOnChain();
+  }, [ownerAgreements, wallet.provider]);
+
+  const openEscrowModal = (item: RentalItem) => {
+    setEscrowTargetItem(item);
+    setCreatedEscrowResult(null);
+    setRenterAddressInput('');
+    setEscrowRentMSTC(((item.dailyPrice * 3) / 1000).toFixed(3));
+    setEscrowDepositMSTC((item.securityDeposit / 1000).toFixed(3));
+    setEscrowDurationDays(3);
+  };
+
+  const handleCreateOnChainEscrow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!escrowTargetItem) return;
+
+    if (!wallet.connected || !wallet.signer) {
+      showToast('Please connect your BridgeKey / EVM wallet first.', 'error');
+      await connect();
+      return;
+    }
+    if (!wallet.isCorrectNetwork) {
+      showToast(`Please switch wallet network to MST Testnet (Chain ID ${MST_NETWORK.chainId}).`, 'error');
+      await switchToMSTNetwork();
+      return;
+    }
+
+    const cleanAddr = renterAddressInput.trim();
+    if (!cleanAddr.startsWith('0x') || cleanAddr.length !== 42) {
+      showToast('Please enter a valid 42-character Ethereum renter address (0x...).', 'error');
+      return;
+    }
+    if (cleanAddr.toLowerCase() === wallet.address.toLowerCase()) {
+      showToast('Owner cannot be renter on the smart contract. Please enter the student renter address.', 'error');
+      return;
+    }
+
+    setIsCreatingEscrow(true);
+    try {
+      showToast('Broadcasting createRental to MST Testnet... Please approve in your wallet.', 'info');
+      const rentWei = parseToWei(escrowRentMSTC);
+      const depositWei = parseToWei(escrowDepositMSTC);
+      const durationSec = BigInt(escrowDurationDays * 86400);
+
+      const result = await createRental(wallet.signer, {
+        renter: cleanAddr,
+        itemRef: escrowTargetItem.id,
+        rentAmountWei: rentWei,
+        depositAmountWei: depositWei,
+        durationSeconds: durationSec,
+      });
+
+      const newAg: OwnerAgreement = {
+        rentalId: Number(result.rentalId),
+        itemId: escrowTargetItem.id,
+        itemTitle: escrowTargetItem.title,
+        renter: cleanAddr,
+        rentMSTC: escrowRentMSTC,
+        depositMSTC: escrowDepositMSTC,
+        durationDays: escrowDurationDays,
+        txHash: result.txHash,
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+
+      const updated = [newAg, ...ownerAgreements];
+      setOwnerAgreements(updated);
+      localStorage.setItem(OWNER_AGREEMENTS_KEY, JSON.stringify(updated));
+      setCreatedEscrowResult({ rentalId: Number(result.rentalId), txHash: result.txHash });
+      showToast(`Escrow agreement #${result.rentalId} deployed on MST Testnet!`, 'success');
+      refreshAgreementsOnChain();
+    } catch (err: any) {
+      console.error('Failed to create rental on-chain:', err);
+      showToast(err?.message || 'Transaction failed or was rejected.', 'error');
+    } finally {
+      setIsCreatingEscrow(false);
+    }
+  };
+
+  const handleOwnerConfirmHandover = async (rentalId: number) => {
+    if (!wallet.connected || !wallet.signer) {
+      showToast('Please connect your wallet.', 'error');
+      await connect();
+      return;
+    }
+    if (!wallet.isCorrectNetwork) {
+      showToast('Please switch network to MST Testnet (91562037).', 'error');
+      await switchToMSTNetwork();
+      return;
+    }
+
+    setActionLoadingRentalId(rentalId);
+    try {
+      showToast('Confirming item handover on MST Testnet...', 'info');
+      await confirmHandover(wallet.signer, BigInt(rentalId));
+      showToast(`Owner handover confirmed for Rental #${rentalId}!`, 'success');
+      refreshAgreementsOnChain();
+    } catch (err: any) {
+      showToast(err?.message || 'Handover confirmation failed.', 'error');
+    } finally {
+      setActionLoadingRentalId(null);
+    }
+  };
+
+  const handleOwnerConfirmReturn = async (rentalId: number) => {
+    if (!wallet.connected || !wallet.signer) {
+      showToast('Please connect your wallet.', 'error');
+      await connect();
+      return;
+    }
+    if (!wallet.isCorrectNetwork) {
+      showToast('Please switch network to MST Testnet (91562037).', 'error');
+      await switchToMSTNetwork();
+      return;
+    }
+
+    setActionLoadingRentalId(rentalId);
+    try {
+      showToast('Confirming item return on MST Testnet... Rent will settle to your wallet.', 'info');
+      await confirmReturn(wallet.signer, BigInt(rentalId));
+      showToast(`Return confirmed! Rental #${rentalId} settled on MST Testnet.`, 'success');
+      refreshAgreementsOnChain();
+    } catch (err: any) {
+      showToast(err?.message || 'Return confirmation failed.', 'error');
+    } finally {
+      setActionLoadingRentalId(null);
+    }
+  };
 
   // Edit form state
   const [editTitle, setEditTitle] = useState('');
@@ -183,6 +376,16 @@ export const MyListings: React.FC = () => {
                   </Link>
 
                   <Button
+                    variant="outline"
+                    size="sm"
+                    className="p-1.5 text-[#3157C8] border-[#3157C8]/40 hover:bg-blue-50"
+                    onClick={() => openEscrowModal(item)}
+                    title="Create MST Testnet Escrow Agreement"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  </Button>
+
+                  <Button
                     variant="secondary"
                     size="sm"
                     className="p-1.5"
@@ -207,6 +410,199 @@ export const MyListings: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* On-Chain Escrow Agreements Section */}
+      {ownerAgreements.length > 0 && (
+        <div className="bg-white border border-[#E5E8EF] rounded-xl overflow-hidden shadow-xs space-y-3 p-5">
+          <div className="flex items-center justify-between pb-3 border-b border-[#E5E8EF]">
+            <div>
+              <h2 className="text-base font-bold text-[#202938] flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-[#3157C8]" />
+                <span>My On-Chain Escrow Agreements ({ownerAgreements.length})</span>
+              </h2>
+              <p className="text-xs text-[#687386] mt-0.5">
+                Smart contract agreements created from your wallet on MST Testnet (Chain ID 91562037).
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={refreshAgreementsOnChain} className="gap-1 text-xs">
+              <RefreshCw className="w-3.5 h-3.5 text-[#3157C8]" />
+              <span>Refresh On-Chain</span>
+            </Button>
+          </div>
+
+          <div className="divide-y divide-[#E5E8EF]">
+            {ownerAgreements.map((ag) => {
+              const onChain = agreementOnChainData[ag.rentalId];
+              const stateNum = onChain ? onChain.state : RentalState.Created;
+              const stateLabel = RentalState[stateNum] ?? 'Created';
+
+              return (
+                <div key={ag.rentalId} className="py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-[#3157C8] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                        Rental #{ag.rentalId}
+                      </span>
+                      <Badge
+                        variant={
+                          stateLabel === 'Active'
+                            ? 'success'
+                            : stateLabel === 'Settled'
+                            ? 'neutral'
+                            : stateLabel === 'Disputed'
+                            ? 'danger'
+                            : 'primary'
+                        }
+                        size="sm"
+                      >
+                        {stateLabel}
+                      </Badge>
+                      <span className="text-[11px] text-[#687386]">Created: {ag.createdAt}</span>
+                    </div>
+                    <h4 className="font-semibold text-sm text-[#202938]">{ag.itemTitle}</h4>
+                    <div className="flex flex-wrap gap-3 text-xs text-[#687386]">
+                      <span>Renter: <span className="font-mono text-[#202938]">{ag.renter.slice(0, 8)}...{ag.renter.slice(-6)}</span></span>
+                      <span>Rent: <strong className="text-[#202938]">{ag.rentMSTC} tMSTC</strong></span>
+                      <span>Deposit: <strong className="text-[#202938]">{ag.depositMSTC} tMSTC</strong></span>
+                      <span>Duration: {ag.durationDays} days</span>
+                    </div>
+                    <div className="pt-0.5">
+                      <a
+                        href={EXPLORER_TX_URL(ag.txHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-mono text-[#3157C8] hover:underline"
+                      >
+                        <span>Tx: {ag.txHash.slice(0, 14)}...</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Owner Action Buttons */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {onChain && onChain.state === RentalState.Booked && !onChain.ownerHandoverConfirmed && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleOwnerConfirmHandover(ag.rentalId)}
+                        isLoading={actionLoadingRentalId === ag.rentalId}
+                        className="text-xs"
+                      >
+                        Confirm Handover
+                      </Button>
+                    )}
+
+                    {onChain && onChain.state === RentalState.Active && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleOwnerConfirmReturn(ag.rentalId)}
+                        isLoading={actionLoadingRentalId === ag.rentalId}
+                        className="text-xs"
+                      >
+                        Confirm Return & Settle
+                      </Button>
+                    )}
+
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/checkout/${ag.itemId}?rentalId=${ag.rentalId}`);
+                        showToast('Checkout link with Rental ID copied to clipboard!', 'info');
+                      }}
+                    >
+                      Copy Renter Link
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Create Escrow Modal */}
+      <Modal
+        isOpen={!!escrowTargetItem}
+        onClose={() => setEscrowTargetItem(null)}
+        title="Create MST Testnet Escrow Agreement"
+        maxWidth="md"
+      >
+        {escrowTargetItem && (
+          <form onSubmit={handleCreateOnChainEscrow} className="space-y-4">
+            <p className="text-xs text-[#687386]">
+              Deploy an immutable rental agreement on the MST Testnet smart contract. You will be registered as the <strong>Owner</strong>. Once deployed, the renter deposits funds into escrow.
+            </p>
+            <div className="p-3 bg-slate-50 border border-[#E5E8EF] rounded-lg text-xs space-y-1">
+              <span className="font-semibold text-[#202938] block">{escrowTargetItem.title}</span>
+              <span className="text-[#687386]">Handover: {escrowTargetItem.location}</span>
+            </div>
+            <Input
+              label="Renter's Ethereum Wallet Address"
+              placeholder="0x..."
+              value={renterAddressInput}
+              onChange={(e) => setRenterAddressInput(e.target.value)}
+              required
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Total Rent (tMSTC)"
+                type="number"
+                step="0.001"
+                min={0.001}
+                value={escrowRentMSTC}
+                onChange={(e) => setEscrowRentMSTC(e.target.value)}
+                required
+              />
+              <Input
+                label="Security Deposit (tMSTC)"
+                type="number"
+                step="0.001"
+                min={0}
+                value={escrowDepositMSTC}
+                onChange={(e) => setEscrowDepositMSTC(e.target.value)}
+                required
+              />
+            </div>
+            <Input
+              label="Agreed Rental Duration (Days)"
+              type="number"
+              min={1}
+              value={escrowDurationDays}
+              onChange={(e) => setEscrowDurationDays(Number(e.target.value))}
+              required
+            />
+            {createdEscrowResult && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 space-y-1">
+                <div className="flex justify-between font-bold">
+                  <span>Success! Agreement Deployed:</span>
+                  <span>Rental #{createdEscrowResult.rentalId}</span>
+                </div>
+                <a
+                  href={EXPLORER_TX_URL(createdEscrowResult.txHash)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[#3157C8] hover:underline"
+                >
+                  <span>View Tx on MST Explorer</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
+            <div className="pt-3 border-t border-[#E5E8EF] flex justify-end gap-2">
+              <Button variant="secondary" size="sm" type="button" onClick={() => setEscrowTargetItem(null)}>
+                Close
+              </Button>
+              <Button variant="primary" size="sm" type="submit" isLoading={isCreatingEscrow}>
+                Deploy to MST Testnet
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       {/* Edit Modal */}
       <Modal

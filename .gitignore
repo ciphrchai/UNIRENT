@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+/blockchain/.env
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Blockchain generated files
+/blockchain/node_modules/
+/blockchain/artifacts/
+/blockchain/cache/
+/blockchain/typechain-types/

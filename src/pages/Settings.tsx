@@ -15,11 +15,16 @@ import { Input } from '../components/common/Input';
 import { Badge } from '../components/common/Badge';
 import { ConfirmationDialog } from '../components/common/ConfirmationDialog';
 import { useToast } from '../components/common/ToastContext';
+import { useWallet } from '../context/WalletContext';
+import { MST_NETWORK, CONTRACT_ADDRESS, EXPLORER_ADDR_URL } from '../blockchain/config';
+import { switchToMSTNetwork } from '../blockchain/wallet';
+import { ExternalLink } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const currentUser = StorageService.getCurrentUser();
-  const [walletBalance, setWalletBalance] = useState(StorageService.getWalletBalance());
   const { showToast } = useToast();
+  const { wallet, connecting, connect, disconnect, refreshWalletBalance } = useWallet();
+  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
 
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
 
@@ -74,7 +79,7 @@ export const Settings: React.FC = () => {
         </p>
       </div>
 
-      {/* Simulated Wallet Integration Section */}
+      {/* MST Blockchain Web3 Wallet Integration Section */}
       <div className="bg-white border border-[#E5E8EF] rounded-xl p-6 shadow-xs space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -83,48 +88,105 @@ export const Settings: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-[#202938]">
-                MST Blockchain Wallet (Testnet)
+                MST Blockchain Wallet (MST Testnet)
               </h3>
               <p className="text-xs text-[#687386]">
-                Simulated Web3 wallet for rental deposits, smart contracts, and escrow.
+                Connected EVM wallet for rental deposit escrow, smart contract verification, and payouts.
               </p>
             </div>
           </div>
-          <Badge variant={isWalletConnected ? 'success' : 'neutral'}>
-            {isWalletConnected ? 'Connected (Simulated)' : 'Disconnected'}
+          <Badge variant={wallet.connected ? (wallet.isCorrectNetwork ? 'success' : 'danger') : 'neutral'}>
+            {wallet.connected
+              ? wallet.isCorrectNetwork
+                ? 'Connected (MST Testnet)'
+                : 'Wrong Network'
+              : 'Disconnected'}
           </Badge>
         </div>
 
-        {isWalletConnected ? (
+        {wallet.connected ? (
           <div className="space-y-3 pt-2">
-            <div className="p-3 bg-slate-50 border border-[#E5E8EF] rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 bg-slate-50 border border-[#E5E8EF] rounded-lg space-y-1">
+                <span className="text-[#687386] block text-[11px]">Connected Wallet Address</span>
+                <a
+                  href={EXPLORER_ADDR_URL(wallet.address)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-[#3157C8] font-medium break-all hover:underline inline-flex items-center gap-1"
+                >
+                  <span>{wallet.address}</span>
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                </a>
+              </div>
+              <div className="p-3 bg-slate-50 border border-[#E5E8EF] rounded-lg space-y-1 sm:text-right">
+                <span className="text-[#687386] block text-[11px]">Native tMSTC Balance</span>
+                <span className="font-bold text-[#3157C8] text-base">{wallet.balance} tMSTC</span>
+                <p className="text-[10px] text-[#687386]">Network: {MST_NETWORK.chainName} ({wallet.chainId})</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-blue-50/70 border border-blue-200/50 rounded-lg text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <div>
-                <span className="text-[#687386] block text-[11px]">Wallet Address</span>
-                <span className="font-mono text-[#202938] font-medium">{currentUser.walletAddress}</span>
+                <span className="text-[11px] text-[#687386] block">Deployed RentalEscrow Smart Contract</span>
+                <span className="font-mono font-bold text-[#202938]">{CONTRACT_ADDRESS}</span>
               </div>
-              <div className="sm:text-right">
-                <span className="text-[#687386] block text-[11px]">Testnet MST Balance</span>
-                <span className="font-bold text-[#3157C8] text-sm">{walletBalance} MST</span>
-              </div>
+              <a
+                href={EXPLORER_ADDR_URL(CONTRACT_ADDRESS)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold text-[#3157C8] hover:underline inline-flex items-center gap-1 shrink-0"
+              >
+                <span>View Contract on Explorer</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handleFaucetRequest}
-                isLoading={isRequestingFaucet}
+                onClick={async () => {
+                  setIsRefreshingBalance(true);
+                  await refreshWalletBalance();
+                  setIsRefreshingBalance(false);
+                  showToast('Wallet balance refreshed from MST Testnet!', 'success');
+                }}
+                isLoading={isRefreshingBalance}
                 className="gap-1.5"
               >
                 <RefreshCw className="w-3.5 h-3.5 text-[#3157C8]" />
-                <span>Request +50 MST Testnet Tokens</span>
+                <span>Refresh Balance</span>
               </Button>
+
+              {!wallet.isCorrectNetwork && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={async () => {
+                    await switchToMSTNetwork();
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700"
+                >
+                  Switch to MST Testnet (91562037)
+                </Button>
+              )}
+
+              <a
+                href="https://faucet.masterstroke.academy"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 border border-slate-200 text-[#202938] hover:bg-slate-200"
+              >
+                <span>Official tMSTC Faucet</span>
+                <ExternalLink className="w-3.5 h-3.5 text-[#687386]" />
+              </a>
 
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setIsWalletConnected(false);
+                  disconnect();
                   showToast('Wallet disconnected from session.', 'info');
                 }}
                 className="text-xs text-[#C94C4C] hover:bg-rose-50"
@@ -134,17 +196,20 @@ export const Settings: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="pt-2">
+          <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-3">
             <Button
               variant="primary"
               size="sm"
-              onClick={() => {
-                setIsWalletConnected(true);
-                showToast('Connected to simulated testnet wallet.', 'success');
+              onClick={async () => {
+                await connect();
               }}
+              isLoading={connecting}
             >
-              Connect Testnet Wallet
+              Connect BridgeKey / EVM Wallet
             </Button>
+            <p className="text-xs text-[#687386]">
+              Compatible with BridgeKey browser extension and MetaMask configured for MST Testnet (Chain ID 91562037).
+            </p>
           </div>
         )}
       </div>

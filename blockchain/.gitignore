@@ -1,0 +1,16 @@
+# Secret files — never commit
+.env
+
+# Build outputs
+node_modules/
+artifacts/
+cache/
+typechain-types/
+dist/
+
+# Deployment info contains ABI — OK to commit, but exclude if it has secrets
+# deployments/
+
+# OS
+.DS_Store
+Thumbs.db

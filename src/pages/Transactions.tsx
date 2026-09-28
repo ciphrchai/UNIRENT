@@ -11,6 +11,7 @@ import { StorageService } from '../services/storageService';
 import { TransactionRecord } from '../types';
 import { Badge } from '../components/common/Badge';
 import { formatINR } from '../utils/format';
+import { EXPLORER_TX_URL } from '../blockchain/config';
 
 export const Transactions: React.FC = () => {
   const transactions = StorageService.getTransactions();
@@ -39,7 +40,7 @@ export const Transactions: React.FC = () => {
       <div>
         <h1 className="text-2xl font-bold text-[#202938]">Transaction & Escrow History</h1>
         <p className="text-xs text-[#687386] mt-0.5">
-          Audit trail of student rental fees, security deposit escrow holds, and refunds.
+          Audit trail of student rental fees, security deposit escrow holds, and refunds on MST Testnet.
         </p>
       </div>
 
@@ -47,7 +48,7 @@ export const Transactions: React.FC = () => {
       <div className="bg-blue-50/70 border border-blue-200/60 rounded-xl p-4 flex items-start gap-3">
         <Info className="w-5 h-5 text-[#3157C8] shrink-0 mt-0.5" />
         <div className="text-xs text-[#202938] leading-relaxed">
-          <strong>MST Blockchain Integration Notice:</strong> Transaction references and hashes shown below represent simulated smart-contract state transitions. Future iterations will link directly to the MST public block explorer.
+          <strong>MST Blockchain Layer:</strong> Real escrow transactions executed via UniRent Wallet are verifiable on the public MST Testnet block explorer (Chain ID 91562037). Historical prototype entries are tagged accordingly.
         </div>
       </div>
 
@@ -80,7 +81,7 @@ export const Transactions: React.FC = () => {
                 <th className="py-3.5 px-4">Amount</th>
                 <th className="py-3.5 px-4">Date & Time</th>
                 <th className="py-3.5 px-4">Escrow Status</th>
-                <th className="py-3.5 px-4">Blockchain Hash (Future MST)</th>
+                <th className="py-3.5 px-4">MST Testnet Tx</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5E8EF] text-[#202938]">
@@ -113,10 +114,23 @@ export const Transactions: React.FC = () => {
                       {tx.status}
                     </Badge>
                   </td>
-                  <td className="py-3.5 px-4 font-mono text-[11px] text-[#687386]">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                      {tx.blockchainTxHash || 'Pending integration'}
-                    </span>
+                  <td className="py-3.5 px-4 font-mono text-[11px]">
+                    {tx.blockchainTxHash && tx.blockchainTxHash.startsWith('0x') ? (
+                      <a
+                        href={EXPLORER_TX_URL(tx.blockchainTxHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[#3157C8] hover:underline bg-blue-50 px-2 py-0.5 rounded border border-blue-200"
+                        title={tx.blockchainTxHash}
+                      >
+                        <span>{tx.blockchainTxHash.slice(0, 8)}...{tx.blockchainTxHash.slice(-6)}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="bg-slate-100 text-[#687386] px-2 py-0.5 rounded border border-slate-200">
+                        {tx.blockchainTxHash || 'Prototype record'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

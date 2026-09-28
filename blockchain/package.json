@@ -1,0 +1,23 @@
+{
+  "name": "unirent-blockchain",
+  "version": "1.0.0",
+  "description": "UniRent smart contracts – MST Testnet",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:gas": "REPORT_GAS=true hardhat test",
+    "deploy:mst": "hardhat run scripts/deploy.ts --network mst-testnet",
+    "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
+    "node": "hardhat node",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.1.0",
+    "hardhat": "^2.22.0",
+    "dotenv": "^16.4.5",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2"
+  }
+}

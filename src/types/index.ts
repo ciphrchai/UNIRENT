@@ -63,6 +63,16 @@ export interface RentalBooking {
   status: RentalStatus;
   createdAt: string;
   bookingRef: string;
+  // On-Chain MST Testnet integration fields
+  onChainRentalId?: number;
+  blockchainTxHash?: string;
+  ownerWalletAddress?: string;
+  renterWalletAddress?: string;
+  ownerHandoverConfirmed?: boolean;
+  renterHandoverConfirmed?: boolean;
+  ownerReturnConfirmed?: boolean;
+  renterReturnConfirmed?: boolean;
+  onChainState?: number;
 }
 
 export interface TransactionRecord {
@@ -73,7 +83,9 @@ export interface TransactionRecord {
   amount: number;
   date: string;
   status: 'Completed' | 'Pending Escrow' | 'Refunded' | 'Released';
-  blockchainTxHash?: string; // Placeholder string clearly labeled
+  blockchainTxHash?: string;
+  isRealOnChain?: boolean;
+  rentalId?: number;
 }
 
 export interface DisputeRecord {

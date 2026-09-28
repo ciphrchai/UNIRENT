@@ -18,6 +18,9 @@ import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { Input } from '../common/Input';
 import { useToast } from '../common/ToastContext';
+import { useWallet } from '../../context/WalletContext';
+import { switchToMSTNetwork } from '../../blockchain/wallet';
+import { MST_NETWORK } from '../../blockchain/config';
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -29,6 +32,7 @@ export const Navbar: React.FC = () => {
   const walletBalance = StorageService.getWalletBalance();
   const location = useLocation();
   const { showToast } = useToast();
+  const { wallet, connecting, connect } = useWallet();
 
   const navLinks = [
     { label: 'Home', path: '/' },
@@ -91,16 +95,42 @@ export const Navbar: React.FC = () => {
 
             {/* Right section: Wallet + List Item + Profile */}
             <div className="hidden md:flex items-center gap-3">
-              {/* Simulated Testnet Wallet Indicator */}
-              <Link
-                to="/settings"
-                title="Simulated MST Testnet Balance"
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-50 border border-[#E5E8EF] text-[#202938] hover:bg-slate-100 transition-colors"
-              >
-                <Wallet className="w-3.5 h-3.5 text-[#3157C8]" />
-                <span className="font-semibold">{walletBalance}</span>
-                <span className="text-[#687386] text-[11px]">MST</span>
-              </Link>
+              {/* Web3 Wallet Connection / MST Testnet Indicator */}
+              {!wallet.connected ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={connect}
+                  isLoading={connecting}
+                  className="gap-1.5 text-xs text-[#3157C8] border-[#3157C8]/40 hover:bg-blue-50"
+                >
+                  <Wallet className="w-3.5 h-3.5 text-[#3157C8]" />
+                  <span>Connect Wallet</span>
+                </Button>
+              ) : !wallet.isCorrectNetwork ? (
+                <button
+                  onClick={switchToMSTNetwork}
+                  title={`Connected to chain ID ${wallet.chainId}. Click to switch to MST Testnet (Chain ID ${MST_NETWORK.chainId}).`}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer animate-pulse"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                  <span>Wrong Network (Switch to MST)</span>
+                </button>
+              ) : (
+                <Link
+                  to="/settings"
+                  title={`Connected: ${wallet.address} on ${MST_NETWORK.chainName}`}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-50 border border-[#E5E8EF] text-[#202938] hover:bg-slate-100 transition-colors"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="font-semibold text-[#202938]">{wallet.balance}</span>
+                  <span className="text-[#687386] text-[11px]">tMSTC</span>
+                  <span className="text-[#CBD5E1]">|</span>
+                  <span className="font-mono text-[11px] text-[#3157C8]">
+                    {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
+                  </span>
+                </Link>
+              )}
 
               {/* List Item CTA */}
               <Link to="/create-listing">
@@ -205,8 +235,29 @@ export const Navbar: React.FC = () => {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[10px] text-[#687386]">Simulated Wallet</p>
-                <p className="text-xs font-semibold text-[#3157C8]">{walletBalance} MST</p>
+                {!wallet.connected ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={connect}
+                    isLoading={connecting}
+                    className="text-xs py-1 px-2.5"
+                  >
+                    Connect Wallet
+                  </Button>
+                ) : !wallet.isCorrectNetwork ? (
+                  <button
+                    onClick={switchToMSTNetwork}
+                    className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-300 px-2 py-1 rounded"
+                  >
+                    Switch to MST (91562037)
+                  </button>
+                ) : (
+                  <div>
+                    <p className="text-[10px] text-[#687386]">MST Testnet</p>
+                    <p className="text-xs font-semibold text-[#3157C8]">{wallet.balance} tMSTC</p>
+                  </div>
+                )}
               </div>
             </div>
 
